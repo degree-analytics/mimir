@@ -92,8 +92,14 @@ This repository uses `just` recipes for repeatable tasks:
 just install    # editable install with extras
 just lint       # Ruff checks
 just test       # pytest test-suite
+just test spacewalker  # real-world integration suite
 just build      # build wheel + sdist
 ```
+
+Branch and PR management flows through Graphite’s `gt` CLI (`gt create`,
+`gt modify`, `gt submit`) – avoid raw `git push`/`git rebase`. Stay in the TDD
+loop: add a failing test, implement the change, and rerun `just test` until it
+passes before submission.
 
 The CI pipeline mirrors these steps and must succeed before publishing a release.
 

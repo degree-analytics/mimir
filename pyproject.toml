@@ -60,3 +60,8 @@ where = ["src"]
 
 [tool.hatch.build]
 include = ["src/mimir", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+markers = [
+    "spacewalker: integration tests that operate on the Spacewalker documentation snapshot",
+]

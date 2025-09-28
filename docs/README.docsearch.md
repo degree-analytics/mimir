@@ -109,3 +109,57 @@ locally.
 - `docs/index.md` — documentation taxonomy and ownership.
 - `../spacewalker/docs/workflows/documentation-search-guide.md` — example
   runbook using `just docs search`.
+
+> **Repo layout**: clone the `spacewalker` repository alongside `mimir`
+> (e.g. `/path/to/workspace/mimir` and `/path/to/workspace/spacewalker`). The
+> frozen docs snapshot (`tests/data/spacewalker_docs.tar.gz`) is built from that
+> sibling checkout.
+
+## Spacewalker Integration Coverage
+
+The integration suite exercises Mímir against a frozen snapshot of the
+Spacewalker documentation repo (see `tests/data/spacewalker_docs.tar.gz`). It
+lives alongside the rest of the integration tests (`tests/integration/`) and
+runs with `just test` by default. We also provide a convenience target for
+focused runs:
+
+```bash
+just test spacewalker
+```
+
+In CI the Spacewalker job runs in parallel after the core lint/unit job,
+publishes `spacewalker-metrics.json`, and comments on pull requests with
+index/search/telemetry metrics so reviewers can spot regressions in real-world
+behaviour quickly.
+
+## Development Workflow
+
+Mímir follows the same Justfile/Graphite workflow used across our internal CLIs:
+
+1. **Create a branch with GT**
+
+   ```bash
+   gt create --all -m "feat: short summary"
+   ```
+
+2. **Test-driven changes**
+   - add or adjust tests first (`tests/`)
+   - run `just test` (expect failures), implement, rerun until green
+3. **Lint & docs**
+
+   ```bash
+   just lint
+   just docs check
+   ```
+
+4. **Submit via GT**
+
+   ```bash
+   gt submit
+   ```
+
+5. **Request reviews**
+   - comment on the PR tagging `@codex` and `@claude`
+
+Avoid raw `git push`/`git rebase`; if you hit GT conflicts, use `gt modify`
+or `gt restack` per the Spacewalker workflow docs.

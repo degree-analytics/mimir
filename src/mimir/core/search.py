@@ -723,7 +723,10 @@ class SearchResult:
             Dictionary representation suitable for JSON serialization.
             All nested dataclasses are converted to dictionaries.
         """
-        return asdict(self)
+        payload = asdict(self)
+        payload["relevance_score"] = float(payload["relevance_score"])
+        payload["exact_matches"] = int(payload.get("exact_matches", 0))
+        return payload
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SearchResult":

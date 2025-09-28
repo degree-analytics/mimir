@@ -13,7 +13,7 @@ help:
     @echo "--------------"
     @echo "just install        # install package in editable mode"
     @echo "just lint           # run ruff lint checks"
-    @echo "just test           # run pytest suite"
+    @echo "just test [target]  # run pytest suite (targets: all, spacewalker)"
     @echo "just build          # build distribution artifacts"
     @echo "just docs check     # lint docs + rebuild index"
 
@@ -28,9 +28,15 @@ lint:
 lint-fix:
     @python3.11 -m ruff check --fix src tests
 
-test:
+test target='all':
     @python3.11 -m pip install -q pytest
-    @python3.11 -m pytest -q
+    @case "{{target}}" in \
+        all) python3.11 -m pytest -q ;; \
+        spacewalker) python3.11 -m pytest -m spacewalker --maxfail=1 -q ;; \
+        *) echo "Unknown test target: {{target}}"; \
+           echo "Supported targets: all, spacewalker"; \
+           exit 1 ;; \
+    esac
 
 build:
     @python3.11 -m pip install -q build
