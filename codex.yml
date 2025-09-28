@@ -1,0 +1,10 @@
+version: 1
+project:
+  name: mimir-docsearch
+workflows:
+  default:
+    steps:
+      - run: just install
+      - run: just lint
+      - run: just test
+      - run: just build

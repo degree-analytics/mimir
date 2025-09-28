@@ -1,0 +1,48 @@
+cache_dir: .cache/mimir
+default_search_limit: 10
+docs_paths:
+- docs/
+encoding: utf-8
+file_extensions:
+- .md
+- .txt
+- .rst
+llm:
+  enabled: true
+  max_tokens: 1000
+  model: meta-llama/llama-3.1-8b-instruct
+  provider: openrouter
+  temperature: 0.1
+logging:
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+max_file_size: 10485760
+search_score_threshold: 0.1
+tfidf:
+  max_document_frequency: 0.8
+  min_document_frequency: 1
+  ngram_range:
+  - 1
+  - 2
+vector_search:
+  dimension: 384
+  enabled: false
+  faiss_cache_enabled: false
+  faiss_enabled: false
+  faiss_index_type: IndexFlatIP
+  model: all-MiniLM-L6-v2
+  similarity_threshold: 0.5
+
+# Telemetry and analytics configuration
+telemetry:
+  enabled: false
+  store_queries: true  # Privacy toggle - set to false to not store query text
+  retention_days: 90
+  export_format: json
+  database_path: .cache/mimir/telemetry.db
+  cost_tracking:
+    enabled: true
+    alert_threshold_usd: 10.00
+  privacy:
+    anonymize_queries: false
+    hash_sensitive_data: true

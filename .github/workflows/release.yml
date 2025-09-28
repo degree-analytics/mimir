@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit message
+        id: check
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          if [[ "$MSG" == feat:* ]] || [[ "$MSG" == fix:* ]] || [[ "$MSG" == *"BREAKING"* ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate version
+        if: steps.check.outputs.should_release == 'true'
+        id: version
+        run: |
+          CURRENT_VERSION=$(grep 'version = ' pyproject.toml | head -n1 | cut -d'"' -f2)
+          MSG=$(git log -1 --pretty=%B)
+
+          if [[ "$MSG" == *"BREAKING"* ]]; then
+            VERSION_BUMP="major"
+          elif [[ "$MSG" == feat:* ]]; then
+            VERSION_BUMP="minor"
+          else
+            VERSION_BUMP="patch"
+          fi
+
+          NEW_VERSION=$(python3 - <<PY
+version = "$CURRENT_VERSION".split('.')
+bump = "$VERSION_BUMP"
+major, minor, patch = [int(part) for part in version]
+
+if bump == 'major':
+    major += 1
+    minor = 0
+    patch = 0
+elif bump == 'minor':
+    minor += 1
+    patch = 0
+else:
+    patch += 1
+
+print(f"{major}.{minor}.{patch}")
+PY
+)
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update version files
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          NEW_VERSION=${{ steps.version.outputs.new_version }}
+          sed -i "s/version = \".*\"/version = \"${NEW_VERSION}\"/" pyproject.toml
+          echo "__version__ = \"${NEW_VERSION}\"" > src/mimir/__version__.py
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add pyproject.toml src/mimir/__version__.py
+          git commit -m "chore: bump version to ${NEW_VERSION}"
+          git push
+
+      - name: Create release
+        if: steps.check.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          name: v${{ steps.version.outputs.new_version }}
+          generate_release_notes: true

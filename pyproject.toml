@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mimir-docsearch"
+version = "1.0.0"
+description = "Mímir: lightweight documentation indexing and search CLI"
+readme = "README.md"
+authors = [{name = "SpaceWalker Team", email = "dev@spacecargo.ai"}]
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "PyYAML>=6.0",
+    "structlog>=24.1",
+    "numpy>=1.24",
+    "scikit-learn>=1.3",
+    "httpx>=0.25",
+    "jsonschema>=4.20",
+    "sqlalchemy>=2.0",
+    "sqlite-utils>=3.36",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing :: Indexing",
+]
+keywords = ["documentation", "search", "cli", "indexing", "mimir"]
+
+[project.urls]
+Homepage = "https://github.com/spacecargo/mimir"
+Repository = "https://github.com/spacecargo/mimir"
+Issues = "https://github.com/spacecargo/mimir/issues"
+
+[project.optional-dependencies]
+faiss = ["faiss-cpu>=1.7.4"]
+embeddings = [
+    "sentence-transformers>=2.2",
+]
+full = [
+    "mimir-docsearch[faiss]",
+    "mimir-docsearch[embeddings]",
+]
+
+[project.scripts]
+mimir = "mimir.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.hatch.build]
+include = ["src/mimir", "tests", "README.md", "LICENSE", "pyproject.toml"]
