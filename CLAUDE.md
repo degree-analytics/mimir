@@ -21,12 +21,18 @@ status: "Active"
 
 ## Core Expectations
 
-- Use `Justfile` commands for every workflow: `just install`, `just lint`, `just
-  test`, `just build`.
+- **Justfile-first** – run repo workflows through `just` (`just install`, `just
+  lint`, `just test`, `just build`, `just docs check`) rather than direct
+  `pytest`, `pip`, or `ruff` commands.
+- **GT workflow only** – manage branches/PRs with Graphite’s `gt` CLI (`gt
+  create`, `gt modify`, `gt submit`). Avoid raw `git push`, `git rebase`, or
+  `git merge`.
+- **TDD loop** – write or update tests before implementation, run them to see
+  them fail, implement the change, and rerun until green (`red → green →
+  refactor`).
 - Keep CLI docs (`docs/README.docsearch.md`) synchronized with behavioural
-  changes.
-- Honour YAML configuration defaults and the `--config` flag for new
-  features.
+  changes and update `docs/index.md` taxonomy entries when adding new content.
+- Honour YAML configuration defaults and the `--config` flag for new features.
 - Add or update tests whenever indexing or CLI behaviour changes (fixtures live
   in `tests/conftest.py`).
 - Release automation bumps `pyproject.toml` and `src/mimir/__version__.py`;
