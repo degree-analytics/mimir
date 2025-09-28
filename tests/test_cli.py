@@ -6,6 +6,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from mimir import __version__
 from mimir.cli.main import cli
 
 
@@ -51,3 +52,12 @@ def test_cli_index_search_and_status(sample_docs: Path, minimal_config: Path) ->
     )
     assert status_result.exit_code == 0, status_result.output
     assert "Documents indexed: 2" in status_result.output
+
+
+def test_cli_version_reports_package_version() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["version"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == __version__

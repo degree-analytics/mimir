@@ -56,6 +56,9 @@ mimir ask "How do I configure authentication?"
 
 # Inspect cached metadata
 mimir status
+
+# Check the installed version
+mimir version
 ```
 
 By default Mímir writes cache files to `.cache/mimir` relative to the project

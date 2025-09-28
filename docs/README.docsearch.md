@@ -82,6 +82,15 @@ the most recent build statistics.
 Reports `.cache/mimir` (unless overridden) and shows a non-zero
 document count after indexing.
 
+### Show the installed version
+
+```bash
+mimir version
+```
+
+Prints the currently installed Mímir package version so you can confirm which
+release is active in CI runners or local environments.
+
 ## Configuration
 
 Configuration is expressed as YAML. The most useful settings are:

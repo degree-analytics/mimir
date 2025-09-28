@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import click
 import yaml
 
+from mimir import __version__ as mimir_version
 from mimir.core.indexer import DocumentIndexer
 from mimir.core.search import DocumentSearchEngine, SearchResult
 from mimir.core.settings import get_project_root
@@ -215,6 +216,13 @@ def status(ctx: click.Context) -> None:
     click.echo(f"Last build duration: {metadata.get('build_time', 0):.2f}s")
     click.echo(f"Successful loads: {metadata.get('successful_loads', 0)}")
     click.echo(f"Failed loads: {metadata.get('failed_loads', 0)}")
+
+
+@cli.command()
+def version() -> None:
+    """Print the installed Mímir version."""
+
+    click.echo(mimir_version)
 
 
 __all__ = ["cli"]
