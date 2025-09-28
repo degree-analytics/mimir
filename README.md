@@ -73,6 +73,13 @@ just build      # build wheel + sdist
 
 The CI pipeline mirrors these steps and must succeed before publishing a release.
 
+### Release automation
+
+- Merges to `main` run the `CI` workflow first. If it succeeds, the `Release` workflow runs automatically.
+- The release workflow bumps the version, tags, and publishes a GitHub release **only** when the head commit message starts with `feat:` or `fix:` or contains `BREAKING`.
+- The workflow commits the new version back to `main`, so avoid stacking multiple release-triggering commits without letting automation finish.
+- If the release workflow is skipped, push a qualifying commit message or trigger a rerun after fixing CI.
+
 If you need to install private dependencies (e.g. `llm-cli-tools-core`) inside CI, follow
 the instructions in `docs/PRIVATE_DEPENDENCIES.md` to set up the shared organization-level
 SSH key and workflow snippet.
