@@ -48,8 +48,10 @@ status: "Active"
   replacement.
 - Add new docs using the templates in `.docs-templates/` to keep metadata and
   layout consistent.
-- Prefix release-bound merges with `feat:` or `fix:` (or include `BREAKING`)
-  so the automated release workflow runs to completion.
+- Prefix release-bound merges with `feat:` or `fix:` (or include `BREAKING`) so
+  the automated release workflow runs to completion. The prefixes map to the
+  semantic bump (`fix:` → patch, `feat:` → minor, `BREAKING` → major), and the
+  workflow will push the version update commit for you.
 
 ## References
 

@@ -8,10 +8,18 @@ status: "Active"
 
 # Mímir Docsearch
 
+Mímir is a command-line tool that builds a searchable index of your local
+documentation tree. It returns precise text snippets, can layer on vector
+similarity search for fuzzier matches, and stitches together quick summaries to
+help teams answer support questions without digging through pages manually. The
+project takes its name from Mímir, the wise counselor from Norse mythology who
+guarded a well of knowledge—an apt metaphor for keeping shared docs discoverable.
+
 ## When to Use This
 
 - Setting up the CLI locally to index and search a documentation corpus
 - Pointing teammates to the canonical install and quick start flow
+- Explaining why Mímir accelerates doc lookups for support, enablement, and dev teams
 
 ## Prerequisites
 
@@ -21,9 +29,8 @@ status: "Active"
 
 ## Installation
 
-The package is published from GitHub releases. Until the first public
-release, install it
-from the repository root:
+We will publish release artifacts to GitHub once the first stable version ships;
+until then, install the CLI straight from the repository root:
 
 ```bash
 pip install -e .
@@ -68,6 +75,9 @@ vector_search:
   enabled: false
 ```
 
+Need the full command reference? Run `mimir --help` or see
+`docs/README.docsearch.md` for subcommand details and usage examples.
+
 ## Optional Features
 
 - **Vector search** – install the `full` extra (`pip install -e .[full]`)
@@ -86,7 +96,8 @@ vector_search:
 
 ## Development
 
-This repository uses `just` recipes for repeatable tasks:
+After the editable install, use the `just` recipes to keep development tasks
+fast and repeatable:
 
 ```bash
 just install    # editable install with extras
@@ -109,9 +120,14 @@ The CI pipeline mirrors these steps and must succeed before publishing a release
   workflow runs automatically.
 - The release workflow bumps the version, tags, and publishes a GitHub release
   **only** when the head commit message starts with `feat:` or `fix:` or contains
-  `BREAKING`.
+  `BREAKING`. These markers control the Semantic Versioning bump: `fix:`
+  increments the patch number, `feat:` increments the minor number, and
+  including `BREAKING` anywhere triggers a major release.
 - The workflow commits the new version back to `main`, so avoid stacking
   multiple release-triggering commits without letting automation finish.
+- Skip manual edits to `pyproject.toml` or `src/mimir/__version__.py`; the
+  workflow updates those files and pushes a `chore: bump version …` commit when
+  it runs.
 - If the release workflow is skipped, push a qualifying commit message or
   trigger a rerun after fixing CI.
 

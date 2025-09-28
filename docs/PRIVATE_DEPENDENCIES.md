@@ -63,7 +63,7 @@ status: "Active"
        git config --global \
          url."https://x-access-token:${TOKEN}@github.com/" \
          .insteadOf https://github.com/
-       pip install "git+https://github.com/degree-analytics/llm-cli-tools-core@v0.1.2"
+       pip install "git+https://github.com/degree-analytics/llm-cli-tools-core@v0.1.4"
    ```
 
 5. **Reuse across repositories**
@@ -102,7 +102,7 @@ status: "Active"
    contains `github.com`, start `ssh-agent`, and run:
 
    ```bash
-   pip install git+ssh://git@github.com/degree-analytics/llm-cli-tools-core@v0.1.2
+   pip install git+ssh://git@github.com/degree-analytics/llm-cli-tools-core@v0.1.4
    ```
 
 ## References
