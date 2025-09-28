@@ -1,0 +1,862 @@
+name: Claude Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to post comments to (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write
+
+jobs:
+  claude:
+    if: |
+      (
+        github.event_name == 'issue_comment' && github.event.issue.pull_request && (
+          contains(github.event.comment.body, '@claude') || startsWith(github.event.comment.body, '/claude')
+        )
+      ) || (
+        github.event_name == 'pull_request_review_comment' && (
+          contains(github.event.comment.body, '@claude') || startsWith(github.event.comment.body, '/claude')
+        )
+      ) || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Derive PR number
+        id: pr
+        run: |
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request_review_comment" ]]; then
+            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.pr_number }}" ]]; then
+            echo "number=${{ github.event.inputs.pr_number }}" >> $GITHUB_OUTPUT
+          else
+            echo "number=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout PR branch
+        if: steps.pr.outputs.number != ''
+        run: |
+          # Get PR details and checkout the head branch
+          PR_HEAD_REF=$(gh pr view ${{ steps.pr.outputs.number }} --json headRefName --jq '.headRefName')
+          echo "Checking out PR head branch: $PR_HEAD_REF"
+          git fetch origin "$PR_HEAD_REF"
+          git checkout "$PR_HEAD_REF"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine requested categories
+        id: determine
+        env:
+          BODY: ${{ github.event.comment.body || github.event.review.body || '' }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          body_lc="$(echo "$BODY" | tr '[:upper:]' '[:lower:]')"
+          # Recognized categories
+          all_cats=(docs justfile correctness overengineering)
+          requested=()
+          if echo "$body_lc" | grep -Eq "(@claude|/claude)[^\n]*review[[:space:],]*all"; then
+            requested=("${all_cats[@]}")
+          else
+            for c in "${all_cats[@]}"; do
+              # Word boundary emulation for POSIX grep -E (no \b): (^|non-word) c (non-word|$)
+              if echo "$body_lc" | grep -Eq "(^|[^[:alnum:]_])${c}([^[:alnum:]_]|$)"; then requested+=("$c"); fi
+            done
+          fi
+          # Default to all categories if none explicitly requested
+          if [ ${#requested[@]} -eq 0 ]; then requested=("${all_cats[@]}"); fi
+          cats_csv=$(IFS=, ; echo "${requested[*]}")
+          echo "cats_csv=$cats_csv" >> $GITHUB_OUTPUT
+          if [ ${#requested[@]} -gt 1 ]; then echo "use_sticky=false" >> $GITHUB_OUTPUT; else echo "use_sticky=true" >> $GITHUB_OUTPUT; fi
+
+          # Recognize requested model family from the comment (opus | sonnet | haiku)
+          # Accept common typos like 'ipus' for opus
+          model_family=""
+          if echo "$body_lc" | grep -Eq "(^|[^[:alnum:]_])opus([^[:alnum:]_]|$)|(^|[[:space:]]|:)model[[:space:]:=]+opus" || echo "$body_lc" | grep -Eq "(^|[^[:alnum:]_])ipus([^[:alnum:]_]|$)"; then
+            model_family="opus"
+          elif echo "$body_lc" | grep -Eq "(^|[^[:alnum:]_])sonnet([^[:alnum:]_]|$)|(^|[[:space:]]|:)model[[:space:]:=]+sonnet"; then
+            model_family="sonnet"
+          elif echo "$body_lc" | grep -Eq "(^|[^[:alnum:]_])haiku([^[:alnum:]_]|$)|(^|[[:space:]]|:)model[[:space:]:=]+haiku"; then
+            model_family="haiku"
+          fi
+          echo "model_family=$model_family" >> $GITHUB_OUTPUT
+
+      - name: Prepare Claude args
+        id: sys
+        run: |
+          # Use repository variable CLAUDE_MAX_TURNS if set, otherwise default to 50
+          max_turns="${{ vars.CLAUDE_MAX_TURNS }}"
+          if [[ -z "$max_turns" ]] || ! [[ "$max_turns" =~ ^[0-9]+$ ]] || [[ "$max_turns" -eq 0 ]]; then
+            max_turns=50
+            echo "Using default max-turns: $max_turns (CLAUDE_MAX_TURNS not set, invalid, or zero)"
+          else
+            echo "Using configured max-turns: $max_turns (from CLAUDE_MAX_TURNS variable)"
+          fi
+
+          # Enforce minimum of 5 turns for meaningful reviews
+          if [[ $max_turns -lt 5 ]] && [[ $max_turns -gt 0 ]]; then
+            echo "Warning: CLAUDE_MAX_TURNS too low ($max_turns), using minimum of 5 for meaningful reviews"
+            max_turns=5
+          fi
+
+          # Cap at 100 to prevent excessive API usage
+          if [[ $max_turns -gt 100 ]]; then
+            echo "Warning: CLAUDE_MAX_TURNS too high ($max_turns), using maximum of 100"
+            max_turns=100
+          fi
+
+          echo "claude_args=--max-turns $max_turns" >> "$GITHUB_OUTPUT"
+          echo "max_turns=$max_turns" >> "$GITHUB_OUTPUT"
+
+      # Model defaults live in this workflow.
+      # You can override with repo vars if needed later.
+      - name: Set model defaults
+        id: models_defaults
+        run: |
+          echo "SONNET4=claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
+          echo "OPUS4=claude-opus-4-1-20250805" >> $GITHUB_OUTPUT
+          echo "HAIKU35=claude-3-5-haiku-20241022" >> $GITHUB_OUTPUT
+
+      - name: Determine models (per category)
+        id: models
+        run: |
+          # Allow repo vars to override defaults
+          docs_model="${{ vars.CLAUDE_MODEL_DOCS || steps.models_defaults.outputs.HAIKU35 }}"
+          just_model="${{ vars.CLAUDE_MODEL_JUSTFILE || steps.models_defaults.outputs.HAIKU35 }}"
+          corr_model="${{ vars.CLAUDE_MODEL_CORRECTNESS || steps.models_defaults.outputs.SONNET4 }}"
+          over_model="${{ vars.CLAUDE_MODEL_OVERENGINEERING || steps.models_defaults.outputs.SONNET4 }}"
+
+          echo "docs_model=$docs_model" >> $GITHUB_OUTPUT
+          echo "just_model=$just_model" >> $GITHUB_OUTPUT
+          echo "corr_model=$corr_model" >> $GITHUB_OUTPUT
+          echo "over_model=$over_model" >> $GITHUB_OUTPUT
+
+      - name: Build combined prompt
+        id: combined_prompt
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+          CATS: ${{ steps.determine.outputs.cats_csv }}
+          MAX_TURNS: ${{ steps.sys.outputs.max_turns }}
+        run: |
+          set -euo pipefail
+          cats_list=$(echo "$CATS" | tr ',' ' ')
+          max_turns="${MAX_TURNS:-50}"
+
+          # Calculate turn buffer based on max_turns
+          # IMPORTANT: This logic is duplicated in "Extract review" step (line ~331)
+          # If you modify this calculation, update both locations to stay synchronized
+          # For 50 turns: use 3-turn buffer (start at turn 47)
+          # For other values: use ~6% of max turns as buffer (min 2, max 5)
+          if [[ $max_turns -eq 50 ]]; then
+            early_term_threshold=3
+            trigger_turn=$((max_turns - early_term_threshold))
+          else
+            # Calculate 6% of max_turns for buffer
+            buffer_calc=$((max_turns * 6 / 100))
+            # Ensure buffer is between 2 and 5
+            if [[ $buffer_calc -lt 2 ]]; then
+              early_term_threshold=2
+            elif [[ $buffer_calc -gt 5 ]]; then
+              early_term_threshold=5
+            else
+              early_term_threshold=$buffer_calc
+            fi
+            trigger_turn=$((max_turns - early_term_threshold))
+            # Ensure trigger_turn is at least 1 to prevent negative values
+            if [[ $trigger_turn -lt 1 ]]; then
+              trigger_turn=1
+            fi
+          fi
+
+          cat > prompt-combined.tmp <<EOF
+          Mimir targeted review
+
+          CRITICAL TURN MANAGEMENT (${max_turns} TURNS MAXIMUM):
+          You have exactly ${max_turns} turns. Track your turn count and follow these MANDATORY rules:
+
+          TURN ${trigger_turn} TRIGGER (AUTOMATIC):
+          When you reach turn ${trigger_turn}, IMMEDIATELY execute this completion protocol:
+
+          Turn ${trigger_turn} - START SUMMARY:
+          "⚠️ APPROACHING TURN LIMIT (${trigger_turn}/${max_turns}) - INITIATING COMPLETION PROTOCOL
+
+          ## CRITICAL FINDINGS (High Priority)
+          [List only CRITICAL security/correctness issues found, max 3-5 items]
+
+          ## IMPORTANT ISSUES (Medium Priority)
+          [List important but non-critical issues, max 3-5 items]"
+
+          Turn $((trigger_turn + 1)) - CONTINUE SUMMARY:
+          "## MINOR OBSERVATIONS
+          [Quick bullet list of minor issues or improvements]
+
+          ## AREAS NOT REVIEWED
+          [List any files/sections not fully analyzed due to turn limit]"
+
+          Turn $((trigger_turn + 2)) - FINAL WRAP-UP:
+          "## RECOMMENDED ACTIONS
+          1. [Most critical action item]
+          2. [Second priority action]
+          3. [Consider re-running review if large areas unreviewed]
+
+          END OF REVIEW - Turn limit reached ($((trigger_turn + 2))/${max_turns})"
+
+          IMPORTANT: This is NOT optional. At turn ${trigger_turn}, you MUST stop analysis and begin this protocol.
+          Never attempt new file reads or deep analysis after turn $((trigger_turn - 1)).
+
+          Enforce Mimir rules:
+          - Read /CLAUDE.md and app-specific /apps/*/CLAUDE.md when relevant.
+          - Justfile-first: prefer just over raw docker/aws/git when a just target exists.
+          - Security: no secrets; enforce tenant isolation (RLS); avoid trailing slash API endpoints.
+          - Testing: ensure appropriate tests per change; avoid brittle patterns.
+          - Documentation: keep docs accurate with code and CI; verify referenced commands exist.
+
+          - Categories: ${cats_list}
+          - Repo: ${REPO}
+          - PR: #${PR_NUM}
+
+          Review only the current PR changes. For each selected category, use this guidance:
+          - DOCS: Ensure README/docs match the Mimir CLI behavior, config defaults, and quick-start commands; flag outdated examples or missing env guidance.
+          - JUSTFILE: Check targets align with install/lint/test/build flows; ensure docs/CI references exist and prefer just recipes over raw tooling.
+          - CORRECTNESS: Validate CLI execution paths (index/search/ask/status), configuration handling, and cache/telemetry changes; call out regressions with line refs.
+          - OVERENGINEERING: Highlight unnecessary abstraction in Mimir core/CLI, redundant pipeline steps, or code that complicates maintenance; suggest leaner alternatives.
+
+          Output:
+          - Numbered findings with short titles and one-paragraph explanations; include ≤3-line code snippets if needed.
+          - End with a brief summary and specific next actions.
+          - If approaching turn limit, prioritize critical findings over completeness.
+          EOF
+          echo "prompt<<PROMPT" >> $GITHUB_OUTPUT
+          cat prompt-combined.tmp >> $GITHUB_OUTPUT
+          echo "PROMPT" >> $GITHUB_OUTPUT
+
+      - name: Select model for combined run
+        id: select_model
+        env:
+          CATS: ${{ steps.determine.outputs.cats_csv }}
+          DOCS_MODEL: ${{ steps.models.outputs.docs_model }}
+          CORR_MODEL: ${{ steps.models.outputs.corr_model }}
+          FAMILY: ${{ steps.determine.outputs.model_family }}
+        run: |
+          # If a model family was explicitly requested, honor it.
+          case "${FAMILY}" in
+            opus)
+              model="${{ vars.CLAUDE_MODEL_OPUS || steps.models_defaults.outputs.OPUS4 }}";
+              ;;
+            sonnet)
+              model="${{ vars.CLAUDE_MODEL_SONNET || steps.models.outputs.corr_model }}";;
+            haiku)
+              model="${{ steps.models.outputs.docs_model }}";;
+            *)
+              cats="$CATS"
+              model="$DOCS_MODEL"
+              if echo "$cats" | grep -Eq 'correctness|overengineering'; then
+                model="$CORR_MODEL"
+              fi
+              ;;
+          esac
+          echo "model=$model" >> $GITHUB_OUTPUT
+
+      - name: Enforce 4.x-only for analysis categories
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          model='${{ steps.select_model.outputs.model }}'
+          cats='${{ steps.determine.outputs.cats_csv }}'
+          if echo "$cats" | grep -Eq 'correctness|overengineering'; then
+            if [ -z "$model" ] || ! echo "$model" | grep -Eq '^claude-.*-4(\.|-|$)'; then
+              echo "Analysis categories require Claude 4.x (selected='$model')." >&2
+              echo "Set CLAUDE_MODEL_SONNET/OPUS to a 4.x model or enable 4.x access for this key." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Run Claude (combined)
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: ${{ steps.combined_prompt.outputs.prompt }}
+          claude_args: ${{ steps.sys.outputs.claude_args }} --model ${{ steps.select_model.outputs.model }}
+          use_sticky_comment: true
+          track_progress: ${{ github.event_name != 'workflow_dispatch' }}
+          additional_permissions: |
+            actions: read
+
+      - name: Extract review body
+        id: review
+        if: steps.claude.outputs.execution_file != ''
+        run: |
+          set -euo pipefail
+          f="${{ steps.claude.outputs.execution_file }}"
+          echo "Execution file: $f"
+          # Slurp JSON lines into an array and extract the last result text, if present
+          body=""
+          # Try primary path (result objects)
+          body=$(jq -rs 'map(select(type=="object") | select(.type == "result") | .result) | last // empty' "$f" 2>/dev/null || echo "")
+          # Fallback: some runs stream assistant message as text array
+          if [ -z "$body" ]; then
+            body=$(jq -rs 'map(select(type=="object") | select(.type == "assistant") | .message.content[]? | select(type=="object") | select(.type=="text") | .text) | join("\n\n")' "$f" 2>/dev/null || echo "")
+          fi
+          # Extract model for display when available
+          model=$(jq -rs '([.[] | .model?, .meta.model?] | map(select(type==string)) | last) // "unknown"' "$f" 2>/dev/null || echo "unknown")
+
+          # Count the number of turns used
+          # Each assistant message represents a turn (guard against non-object entries)
+          turns_used=$(jq -rs '[.[] | select(type=="object") | select(.type == "assistant")] | length' "$f" 2>/dev/null || echo "0")
+          echo "turns_used=$turns_used" >> $GITHUB_OUTPUT
+
+          printf '%s' "$body" > review.md || true
+          echo "model=$model" >> $GITHUB_OUTPUT
+
+          # Check if review hit or approached the turn limit
+          # Get max_turns from the sys step output
+          max_turns="${{ steps.sys.outputs.max_turns }}"
+          # Calculate trigger point (same logic as in prompt)
+          # IMPORTANT: This logic duplicates the calculation in "Build combined prompt" (line ~162)
+          # If you modify this calculation, update both locations to stay synchronized
+          if [[ $max_turns -eq 50 ]]; then
+            trigger_turn=47
+            buffer_turns=3
+          else
+            # Calculate 6% of max_turns for buffer
+            buffer_calc=$((max_turns * 6 / 100))
+            # Ensure buffer is between 2 and 5
+            if [[ $buffer_calc -lt 2 ]]; then
+              buffer_turns=2
+            elif [[ $buffer_calc -gt 5 ]]; then
+              buffer_turns=5
+            else
+              buffer_turns=$buffer_calc
+            fi
+            trigger_turn=$((max_turns - buffer_turns))
+            # Ensure trigger_turn is at least 1 to prevent negative values
+            if [[ $trigger_turn -lt 1 ]]; then
+              trigger_turn=1
+            fi
+          fi
+
+          # Distinguish between buffer triggered vs hard limit reached
+          is_partial="false"
+          limit_status=""
+
+          if [[ $turns_used -eq $max_turns ]]; then
+            # Hard limit reached - review may be incomplete
+            is_partial="true"
+            limit_status="limit_reached"
+            echo "⚠️ Review hit maximum turn limit - used $turns_used/$max_turns turns"
+            echo "  Review was cut off at maximum turn limit"
+          elif [[ $turns_used -ge $trigger_turn ]]; then
+            # Buffer protocol triggered - review completed with summary
+            is_partial="true"
+            limit_status="buffer_triggered"
+            echo "ℹ️ Review triggered buffer completion protocol at turn $turns_used/$max_turns"
+            echo "  Review completed with structured summary"
+          elif grep -q "APPROACHING TURN LIMIT" review.md 2>/dev/null; then
+            # Content indicates buffer was triggered
+            is_partial="true"
+            limit_status="buffer_triggered"
+            echo "ℹ️ Review approached turn limit based on content"
+          fi
+
+          echo "is_partial=$is_partial" >> $GITHUB_OUTPUT
+          echo "limit_status=$limit_status" >> $GITHUB_OUTPUT
+
+          if [ -s review.md ]; then
+            echo "has_body=true" >> $GITHUB_OUTPUT
+            {
+              echo 'body<<EOF'
+              cat review.md
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+          else
+            echo "has_body=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post review (sticky)
+        if: steps.pr.outputs.number != '' && steps.review.outputs.has_body == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: claude-review
+          message: |
+            Claude Review${{ steps.review.outputs.limit_status == 'limit_reached' && ' ⚠️ (TURN LIMIT REACHED)' || steps.review.outputs.limit_status == 'buffer_triggered' && ' ℹ️ (APPROACHING LIMIT)' || '' }}
+            - Categories: ${{ steps.determine.outputs.cats_csv }}
+            - Model: ${{ steps.review.outputs.model }}
+            - Turns Used: **${{ steps.review.outputs.turns_used || '?' }} / ${{ steps.sys.outputs.max_turns }}**${{ steps.review.outputs.limit_status == 'limit_reached' && ' ⚠️ (hard limit)' || steps.review.outputs.limit_status == 'buffer_triggered' && ' ℹ️ (nearing limit)' || '' }}
+
+            ---
+            ${{ steps.review.outputs.body }}
+          recreate: true
+          hide_and_recreate: true
+
+      - name: Build prompt (docs)
+        id: prompt_docs
+        if: ${{ false }}
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          cat > prompt-docs.tmp <<EOF
+          Mimir targeted review
+
+          Enforce Mimir rules:
+          - Read /CLAUDE.md and app-specific /apps/*/CLAUDE.md when relevant.
+          - Justfile-first: prefer just over raw docker/aws/git when a just target exists.
+          - Security: no secrets; enforce tenant isolation (RLS); avoid trailing slash API endpoints.
+          - Testing: ensure appropriate tests per change; avoid brittle patterns.
+          - Documentation: keep docs accurate with code and CI; verify referenced commands exist.
+
+          - Category: docs
+          - Repo: ${REPO}
+          - PR: #${PR_NUM}
+
+          Review only the current PR changes. Confirm docs reflect current Mimir CLI behavior, configuration defaults, telemetry notes, and quick-start steps. Flag outdated examples, missing environment guidance, or mismatches with README/CLI help output.
+
+          Output:
+          - Numbered findings with short titles and one-paragraph explanations; include ≤3-line code snippets if needed.
+          - End with a brief summary and specific next actions.
+          EOF
+          echo "prompt<<PROMPT" >> $GITHUB_OUTPUT
+          cat prompt-docs.tmp >> $GITHUB_OUTPUT
+          echo "PROMPT" >> $GITHUB_OUTPUT
+
+      - name: Run Claude (docs)
+        id: claude_docs
+        if: ${{ false }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt_docs.outputs.prompt }}
+          claude_args: ${{ steps.sys.outputs.claude_args }} --model ${{ steps.models.outputs.docs_model }}
+          use_sticky_comment: ${{ steps.determine.outputs.use_sticky }}
+          track_progress: true
+          additional_permissions: |
+            actions: read
+
+      - name: Build prompt (justfile)
+        id: prompt_just
+        if: ${{ false }}
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          cat > prompt-just.tmp <<EOF
+          Mimir targeted review
+
+          Enforce Mimir rules:
+          - Read /CLAUDE.md and app-specific /apps/*/CLAUDE.md when relevant.
+          - Justfile-first: prefer just over raw docker/aws/git when a just target exists.
+          - Security: no secrets; enforce tenant isolation (RLS); avoid trailing slash API endpoints.
+          - Testing: ensure appropriate tests per change; avoid brittle patterns.
+          - Documentation: keep docs accurate with code and CI; verify referenced commands exist.
+
+          - Category: justfile
+          - Repo: ${REPO}
+          - PR: #${PR_NUM}
+
+          Review only the current PR changes. Validate Justfile targets for install/lint/test/build flows, dependency management, and idempotency. Ensure docs/CI reference existing recipes and prefer just targets over raw tooling when possible.
+
+          Output:
+          - Numbered findings with short titles and one-paragraph explanations; include ≤3-line code snippets if needed.
+          - End with a brief summary and specific next actions.
+          EOF
+          echo "prompt<<PROMPT" >> $GITHUB_OUTPUT
+          cat prompt-just.tmp >> $GITHUB_OUTPUT
+          echo "PROMPT" >> $GITHUB_OUTPUT
+
+      - name: Run Claude (justfile)
+        id: claude_just
+        if: ${{ false }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt_just.outputs.prompt }}
+          claude_args: ${{ steps.sys.outputs.claude_args }} --model ${{ steps.models.outputs.just_model }}
+          use_sticky_comment: ${{ steps.determine.outputs.use_sticky }}
+          track_progress: true
+          additional_permissions: |
+            actions: read
+
+      - name: Build prompt (correctness)
+        id: prompt_corr
+        if: ${{ false }}
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          cat > prompt-corr.tmp <<EOF
+          Mimir targeted review
+
+          Enforce Mimir rules:
+          - Read /CLAUDE.md and app-specific /apps/*/CLAUDE.md when relevant.
+          - Justfile-first: prefer just over raw docker/aws/git when a just target exists.
+          - Security: no secrets; enforce tenant isolation (RLS); avoid trailing slash API endpoints.
+          - Testing: ensure appropriate tests per change; avoid brittle patterns.
+          - Documentation: keep docs accurate with code and CI; verify referenced commands exist.
+
+          - Category: correctness
+          - Repo: ${REPO}
+          - PR: #${PR_NUM}
+
+          Review only the current PR changes. Identify correctness/security issues in Mimir core, cache/index helpers, and CLI commands. Provide precise file/line references and avoid speculation beyond the diff.
+
+          Output:
+          - Numbered findings with short titles and one-paragraph explanations; include ≤3-line code snippets if needed.
+          - End with a brief summary and specific next actions.
+          EOF
+          echo "prompt<<PROMPT" >> $GITHUB_OUTPUT
+          cat prompt-corr.tmp >> $GITHUB_OUTPUT
+          echo "PROMPT" >> $GITHUB_OUTPUT
+
+      - name: Run Claude (correctness)
+        id: claude_corr
+        if: ${{ false }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt_corr.outputs.prompt }}
+          claude_args: ${{ steps.sys.outputs.claude_args }} --model ${{ steps.models.outputs.corr_model }}
+          use_sticky_comment: ${{ steps.determine.outputs.use_sticky }}
+          track_progress: true
+          additional_permissions: |
+            actions: read
+
+      - name: Build prompt (overengineering)
+        id: prompt_over
+        if: ${{ false }}
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.pr.outputs.number }}
+        run: |
+          cat > prompt-over.tmp <<EOF
+          Mimir targeted review
+
+          Enforce Mimir rules:
+          - Read /CLAUDE.md and app-specific /apps/*/CLAUDE.md when relevant.
+          - Justfile-first: prefer just over raw docker/aws/git when a just target exists.
+          - Security: no secrets; enforce tenant isolation (RLS); avoid trailing slash API endpoints.
+          - Testing: ensure appropriate tests per change; avoid brittle patterns.
+          - Documentation: keep docs accurate with code and CI; verify referenced commands exist.
+
+          - Category: overengineering
+          - Repo: ${REPO}
+          - PR: #${PR_NUM}
+
+          Review only the current PR changes. Flag unnecessary abstractions in Mimir pipelines/CLI/core modules, redundant helpers, or dead code. Suggest leaner alternatives and call out maintenance tradeoffs.
+
+          Output:
+          - Numbered findings with short titles and one-paragraph explanations; include ≤3-line code snippets if needed.
+          - End with a brief summary and specific next actions.
+          EOF
+          echo "prompt<<PROMPT" >> $GITHUB_OUTPUT
+          cat prompt-over.tmp >> $GITHUB_OUTPUT
+          echo "PROMPT" >> $GITHUB_OUTPUT
+
+      - name: Run Claude (overengineering)
+        id: claude_over
+        if: ${{ false }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt_over.outputs.prompt }}
+          claude_args: ${{ steps.sys.outputs.claude_args }} --model ${{ steps.models.outputs.over_model }}
+          use_sticky_comment: ${{ steps.determine.outputs.use_sticky }}
+          track_progress: true
+          additional_permissions: |
+            actions: read
+
+      - name: Parse execution metrics (best-effort)
+        id: metrics
+        if: always() && steps.claude.outputs.execution_file
+        continue-on-error: true
+        env:
+          COSTS_JSON: ${{ vars.CLAUDE_COSTS_JSON }}
+          FALLBACK_IN_RATE: ${{ vars.CLAUDE_INPUT_COST_PER_MTOK }}
+          FALLBACK_OUT_RATE: ${{ vars.CLAUDE_OUTPUT_COST_PER_MTOK }}
+        run: |
+          set -euo pipefail
+          f="${{ steps.claude.outputs.execution_file }}"
+          echo "Execution file: $f"
+          python scripts/helpers/claude_metrics.py \
+            "$f" \
+            --costs-json "${COSTS_JSON:-}" \
+            --costs-file ".github/claude-costs.json" \
+            --fallback-in-rate "${FALLBACK_IN_RATE:-}" \
+            --fallback-out-rate "${FALLBACK_OUT_RATE:-}" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Prepare metrics display values
+        id: display
+        if: steps.pr.outputs.number != ''
+        run: |
+          set -euo pipefail
+          model='${{ steps.metrics.outputs.model }}'
+          selected='${{ steps.select_model.outputs.model }}'
+          if [ -z "$model" ] || [ "$model" = "unknown" ] || [ "$model" = "null" ]; then
+            model="$selected"
+          fi
+          echo "model=$model" >> $GITHUB_OUTPUT
+
+      - name: Post sticky metrics (Claude)
+        if: steps.pr.outputs.number != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: claude-review-metrics
+          message: |
+            Claude Review Metrics
+            - Categories: ${{ steps.determine.outputs.cats_csv }}
+            - Model: ${{ steps.display.outputs.model || steps.select_model.outputs.model }}
+            - Turns Used: **${{ steps.review.outputs.turns_used || '?' }} / ${{ steps.sys.outputs.max_turns }}**
+            - Input tokens: ${{ steps.metrics.outputs.in_tokens || 'n/a' }}
+            - Output tokens: ${{ steps.metrics.outputs.out_tokens || 'n/a' }}
+            - Estimated cost (USD): ${{ steps.metrics.outputs.est_cost_usd || 'n/a' }}
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Claude Review (combined)" >> $GITHUB_STEP_SUMMARY
+          echo "- Categories: ${{ steps.determine.outputs.cats_csv }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ steps.display.outputs.model || steps.select_model.outputs.model }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Turns Used: ${{ steps.review.outputs.turns_used || '?' }} / ${{ steps.sys.outputs.max_turns }}**" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.review.outputs.limit_status }}" == "limit_reached" ]]; then
+            echo "- ⚠️ **Turn limit reached - review may be incomplete**" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ steps.review.outputs.limit_status }}" == "buffer_triggered" ]]; then
+            echo "- ℹ️ **Near limit - review completed with structured summary**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- Input tokens: ${{ steps.metrics.outputs.in_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Output tokens: ${{ steps.metrics.outputs.out_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.metrics.outputs.est_cost_usd }}" ]; then
+            echo "- Estimated cost (USD): ${{ steps.metrics.outputs.est_cost_usd }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Parse execution metrics (best-effort) — justfile
+        id: metrics_just
+        if: ${{ false }}
+        env:
+          COSTS_JSON: ${{ vars.CLAUDE_COSTS_JSON }}
+        run: |
+          set -euo pipefail
+          f="${{ steps.claude_just.outputs.execution_file }}"
+          echo "Execution file: $f"
+          in_tokens=$(jq -r '[.[] | .usage.inputTokens?, .usage.input_tokens?, .metrics.input_tokens?] | map(select(type==number)) | add // 0' "$f")
+          out_tokens=$(jq -r '[.[] | .usage.outputTokens?, .usage.output_tokens?, .metrics.output_tokens?] | map(select(type==number)) | add // 0' "$f")
+          model=$(jq -r '([.[] | .model?, .meta.model?] | map(select(type==string)) | .[0]) // "unknown"' "$f")
+          echo "in_tokens=$in_tokens" >> $GITHUB_OUTPUT
+          echo "out_tokens=$out_tokens" >> $GITHUB_OUTPUT
+          echo "model=$model" >> $GITHUB_OUTPUT
+          IN_RATE=""; OUT_RATE=""
+          if [ -n "$COSTS_JSON" ]; then
+            printf '%s' "$COSTS_JSON" > costs.json
+          elif [ -f .github/claude-costs.json ]; then
+            cp .github/claude-costs.json costs.json
+          fi
+          if [ -f costs.json ]; then
+            IN_RATE=$(jq -r --arg m "$model" 'try .[$m].in // empty' costs.json)
+            OUT_RATE=$(jq -r --arg m "$model" 'try .[$m].out // empty' costs.json)
+          fi
+          if [ -n "$IN_RATE" ] && [ -n "$OUT_RATE" ]; then
+            cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+            cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+            total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+            echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+          else
+            IN_RATE='${{ vars.CLAUDE_INPUT_COST_PER_MTOK }}'
+            OUT_RATE='${{ vars.CLAUDE_OUTPUT_COST_PER_MTOK }}'
+            if [[ -n "${IN_RATE}" && -n "${OUT_RATE}" ]]; then
+              cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+              cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+              total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+              echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Post sticky metrics (Claude — justfile)
+        if: ${{ false }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: claude-review-metrics-justfile
+          message: |
+            Claude Review Metrics
+            - Category: justfile
+            - Model: ${{ steps.metrics_just.outputs.model || 'unknown' }}
+            - Input tokens: ${{ steps.metrics_just.outputs.in_tokens || 'n/a' }}
+            - Output tokens: ${{ steps.metrics_just.outputs.out_tokens || 'n/a' }}
+            - Estimated cost (USD): ${{ steps.metrics_just.outputs.est_cost_usd || 'n/a' }}
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Job summary — justfile
+        if: ${{ false }}
+        run: |
+          echo "## Claude Review (justfile)" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ steps.metrics_just.outputs.model || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Input tokens: ${{ steps.metrics_just.outputs.in_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Output tokens: ${{ steps.metrics_just.outputs.out_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.metrics_just.outputs.est_cost_usd }}" ]; then
+            echo "- Estimated cost (USD): ${{ steps.metrics_just.outputs.est_cost_usd }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Parse execution metrics (best-effort) — correctness
+        id: metrics_corr
+        if: ${{ false }}
+        env:
+          COSTS_JSON: ${{ vars.CLAUDE_COSTS_JSON }}
+        run: |
+          set -euo pipefail
+          f="${{ steps.claude_corr.outputs.execution_file }}"
+          echo "Execution file: $f"
+          in_tokens=$(jq -r '[.[] | .usage.inputTokens?, .usage.input_tokens?, .metrics.input_tokens?] | map(select(type==number)) | add // 0' "$f")
+          out_tokens=$(jq -r '[.[] | .usage.outputTokens?, .usage.output_tokens?, .metrics.output_tokens?] | map(select(type==number)) | add // 0' "$f")
+          model=$(jq -r '([.[] | .model?, .meta.model?] | map(select(type==string)) | .[0]) // "unknown"' "$f")
+          echo "in_tokens=$in_tokens" >> $GITHUB_OUTPUT
+          echo "out_tokens=$out_tokens" >> $GITHUB_OUTPUT
+          echo "model=$model" >> $GITHUB_OUTPUT
+          IN_RATE=""; OUT_RATE=""
+          if [ -n "$COSTS_JSON" ]; then
+            printf '%s' "$COSTS_JSON" > costs.json
+          elif [ -f .github/claude-costs.json ]; then
+            cp .github/claude-costs.json costs.json
+          fi
+          if [ -f costs.json ]; then
+            IN_RATE=$(jq -r --arg m "$model" 'try .[$m].in // empty' costs.json)
+            OUT_RATE=$(jq -r --arg m "$model" 'try .[$m].out // empty' costs.json)
+          fi
+          if [ -n "$IN_RATE" ] && [ -n "$OUT_RATE" ]; then
+            cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+            cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+            total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+            echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+          else
+            IN_RATE='${{ vars.CLAUDE_INPUT_COST_PER_MTOK }}'
+            OUT_RATE='${{ vars.CLAUDE_OUTPUT_COST_PER_MTOK }}'
+            if [[ -n "${IN_RATE}" && -n "${OUT_RATE}" ]]; then
+              cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+              cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+              total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+              echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Post sticky metrics (Claude — correctness)
+        if: ${{ false }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: claude-review-metrics-correctness
+          message: |
+            Claude Review Metrics
+            - Category: correctness
+            - Model: ${{ steps.metrics_corr.outputs.model || 'unknown' }}
+            - Input tokens: ${{ steps.metrics_corr.outputs.in_tokens || 'n/a' }}
+            - Output tokens: ${{ steps.metrics_corr.outputs.out_tokens || 'n/a' }}
+            - Estimated cost (USD): ${{ steps.metrics_corr.outputs.est_cost_usd || 'n/a' }}
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Job summary — correctness
+        if: ${{ false }}
+        run: |
+          echo "## Claude Review (correctness)" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ steps.metrics_corr.outputs.model || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Input tokens: ${{ steps.metrics_corr.outputs.in_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Output tokens: ${{ steps.metrics_corr.outputs.out_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.metrics_corr.outputs.est_cost_usd }}" ]; then
+            echo "- Estimated cost (USD): ${{ steps.metrics_corr.outputs.est_cost_usd }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Parse execution metrics (best-effort) — overengineering
+        id: metrics_over
+        if: ${{ false }}
+        env:
+          COSTS_JSON: ${{ vars.CLAUDE_COSTS_JSON }}
+        run: |
+          set -euo pipefail
+          f="${{ steps.claude_over.outputs.execution_file }}"
+          echo "Execution file: $f"
+          in_tokens=$(jq -r '[.[] | .usage.inputTokens?, .usage.input_tokens?, .metrics.input_tokens?] | map(select(type==number)) | add // 0' "$f")
+          out_tokens=$(jq -r '[.[] | .usage.outputTokens?, .usage.output_tokens?, .metrics.output_tokens?] | map(select(type==number)) | add // 0' "$f")
+          model=$(jq -r '([.[] | .model?, .meta.model?] | map(select(type==string)) | .[0]) // "unknown"' "$f")
+          echo "in_tokens=$in_tokens" >> $GITHUB_OUTPUT
+          echo "out_tokens=$out_tokens" >> $GITHUB_OUTPUT
+          echo "model=$model" >> $GITHUB_OUTPUT
+          IN_RATE=""; OUT_RATE=""
+          if [ -n "$COSTS_JSON" ]; then
+            printf '%s' "$COSTS_JSON" > costs.json
+          elif [ -f .github/claude-costs.json ]; then
+            cp .github/claude-costs.json costs.json
+          fi
+          if [ -f costs.json ]; then
+            IN_RATE=$(jq -r --arg m "$model" 'try .[$m].in // empty' costs.json)
+            OUT_RATE=$(jq -r --arg m "$model" 'try .[$m].out // empty' costs.json)
+          fi
+          if [ -n "$IN_RATE" ] && [ -n "$OUT_RATE" ]; then
+            cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+            cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+            total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+            echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+          else
+            IN_RATE='${{ vars.CLAUDE_INPUT_COST_PER_MTOK }}'
+            OUT_RATE='${{ vars.CLAUDE_OUTPUT_COST_PER_MTOK }}'
+            if [[ -n "${IN_RATE}" && -n "${OUT_RATE}" ]]; then
+              cost_in=$(awk "BEGIN { printf \"%.6f\", (${in_tokens}/1000000.0)*${IN_RATE} }")
+              cost_out=$(awk "BEGIN { printf \"%.6f\", (${out_tokens}/1000000.0)*${OUT_RATE} }")
+              total=$(awk "BEGIN { printf \"%.6f\", ${cost_in}+${cost_out} }")
+              echo "est_cost_usd=$total" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Post sticky metrics (Claude — overengineering)
+        if: ${{ false }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.pr.outputs.number }}
+          header: claude-review-metrics-overengineering
+          message: |
+            Claude Review Metrics
+            - Category: overengineering
+            - Model: ${{ steps.metrics_over.outputs.model || 'unknown' }}
+            - Input tokens: ${{ steps.metrics_over.outputs.in_tokens || 'n/a' }}
+            - Output tokens: ${{ steps.metrics_over.outputs.out_tokens || 'n/a' }}
+            - Estimated cost (USD): ${{ steps.metrics_over.outputs.est_cost_usd || 'n/a' }}
+            - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Job summary — overengineering
+        if: ${{ false }}
+        run: |
+          echo "## Claude Review (overengineering)" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${{ steps.metrics_over.outputs.model || 'unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Input tokens: ${{ steps.metrics_over.outputs.in_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Output tokens: ${{ steps.metrics_over.outputs.out_tokens || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.metrics_over.outputs.est_cost_usd }}" ]; then
+            echo "- Estimated cost (USD): ${{ steps.metrics_over.outputs.est_cost_usd }}" >> $GITHUB_STEP_SUMMARY
+          fi
