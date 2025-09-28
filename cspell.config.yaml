@@ -1,0 +1,66 @@
+version: "0.2"
+language: "en"
+dictionaries:
+  - en_us
+ignorePaths:
+  - .git/
+  - .venv/
+  - .cache/
+  - node_modules/
+  - dist/
+  - build/
+  - __pycache__/
+  - coverage-artifacts/
+  - .build/
+  - scripts/helpers/claude_metrics.py
+  - .github/scripts/post_coverage_comment.py
+words:
+  - Mímir
+  - mimir
+  - FAISS
+  - OPENROUTER
+  - sdist
+  - docsearch
+  - docstring
+  - mkdocs
+  - justfile
+  - xaccess
+  - postprocessing
+  - preprocess
+  - runtimes
+  - llm
+  - uv
+  - pytest
+  - subprocess
+  - roadmap
+  - claude
+  - codex
+  - tibdex
+  - keypair
+  - overengineering
+  - runbook
+  - vectorizer
+  - tfidf
+  - behaviour
+  - behavioural
+  - conftest
+  - pyproject
+  - maxfail
+  - localstack
+  - postgis
+  - postgresql
+  - multitenant
+  - devops
+  - workspace
+  - readme
+  - yaml
+  - prerelease
+  - backend
+  - frontend
+  - minified
+  - hotfix
+  - validators
+  - workflows
+  - in_tokens
+  - out_tokens
+  - mtok

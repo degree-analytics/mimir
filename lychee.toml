@@ -1,0 +1,16 @@
+cache = true
+max_concurrency = 4
+retry_wait_time = 2
+max_redirects = 5
+
+# Known placeholder links to other repos or future docs
+exclude = [
+  "https://github.com/spacecargo/mimir/issues",
+  "../spacewalker/docs/setup/getting-started.md",
+  "../spacewalker/docs/architecture/system-architecture.md",
+  "../spacewalker/docs/workflows/documentation-search-guide.md"
+]
+
+exclude_all_private = true
+exclude_mail = true
+

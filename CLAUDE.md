@@ -1,14 +1,59 @@
+---
+purpose: "Capture contributor guardrails for the Mímir repository"
+audience: "Contributors, reviewers, automation authors"
+owner: "Docs Guild"
+review: "2025-10-01 (Quarterly)"
+status: "Active"
+---
+
 # Mímir Contributor Guidelines
 
-- Use the `Justfile` commands for every workflow (`just install`, `just lint`, `just test`,
-  `just build`). CI mirrors these steps.
-- The CLI now exposes four supported commands: `mimir index`, `mimir search`, `mimir ask`,
-  and `mimir status`. Keep docs and examples in sync when behaviour changes.
-- Configuration lives in small YAML files. Honour the `--config` flag in new features and
-  ensure defaults remain safe for offline execution (vector search stays optional).
-- Always add or update tests when touching indexing or CLI behaviour. The suite relies on
-  the fixtures in `tests/conftest.py`.
-- Release automation bumps `pyproject.toml` and `src/mimir/__version__.py`. Conventional
-  commit prefixes (`feat:`, `fix:`) decide whether a tag is created.
-- Telemetry still uses the local compatibility shim. Plan a follow-up to integrate the
-  shared `llm-cli-tools-core` package once it ships.
+## When to Use This
+
+- Before authoring code or documentation changes
+- During reviews to confirm conventions are followed
+
+## Prerequisites
+
+- `just` installed locally
+- Familiarity with `.docs-templates/` and `docs/index.md`
+- Node.js 18+ available locally so `just docs check` can run markdownlint
+
+## Core Expectations
+
+- Use `Justfile` commands for every workflow: `just install`, `just lint`, `just
+  test`, `just build`.
+- Keep CLI docs (`docs/README.docsearch.md`) synchronized with behavioural
+  changes.
+- Honour YAML configuration defaults and the `--config` flag for new
+  features.
+- Add or update tests whenever indexing or CLI behaviour changes (fixtures live
+  in `tests/conftest.py`).
+- Release automation bumps `pyproject.toml` and `src/mimir/__version__.py`;
+  conventional commit prefixes (`feat:`, `fix:`) control tagging.
+
+## Documentation Conventions
+
+1. Start every doc with the shared metadata block (Purpose, Audience, Owner,
+   Review, Status) followed by **When to Use This** and **Prerequisites**.
+2. Use the templates in `.docs-templates/` when adding new documentation.
+3. Reference `docs/index.md` to map each doc to its taxonomy entry; mark new
+   docs as Planned/Active as needed.
+4. Run `just docs check` before sending a PR and ensure the `docs-quality`
+   GitHub Action finishes green.
+5. Use examples from `../spacewalker/docs/setup/getting-started.md` and
+   `../spacewalker/docs/architecture/system-architecture.md` when shaping
+   onboarding or architecture docs.
+
+## Automation Alignment
+
+- `codex.yml` mirrors CI (install → lint → test → build).
+- `just docs check` performs Markdown linting, runs the `mimir index` smoke
+  test, and executes `scripts/docs_phase2.sh` (cspell + lychee). Keep Node.js
+  18+ and a Rust toolchain available on developer machines and CI runners.
+
+## Follow-Ups
+
+- Plan the onboarding and architecture docs noted in `docs/index.md`.
+- Schedule quarterly doc reviews during roadmap planning to keep `Review:`
+  metadata accurate.

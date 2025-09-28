@@ -1,0 +1,14 @@
+{
+  "claude-3-5-haiku-20241022": {
+    "input_per_mtok": 1.25,
+    "output_per_mtok": 5.00
+  },
+  "claude-3-5-sonnet-20241022": {
+    "input_per_mtok": 3.00,
+    "output_per_mtok": 15.00
+  },
+  "claude-opus-4-1-20250805": {
+    "input_per_mtok": 15.00,
+    "output_per_mtok": 75.00
+  }
+}

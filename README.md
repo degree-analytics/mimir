@@ -1,12 +1,28 @@
+---
+purpose: "Overview and quick start for the Mímir documentation search CLI"
+audience: "Developers integrating docs search; repository maintainers"
+owner: "Docs Guild"
+review: "2025-10-01 (Quarterly)"
+status: "Active"
+---
+
 # Mímir Docsearch
 
-Mímir is a lightweight documentation indexer and search CLI. It turns a directory of
-Markdown, text, or reStructuredText files into a searchable cache that can be queried from
-any shell.
+## When to Use This
+
+- Setting up the CLI locally to index and search a documentation corpus
+- Pointing teammates to the canonical install and quick start flow
+
+## Prerequisites
+
+- Python 3.11+
+- `just` command runner (`brew install just` on macOS)
+- Local clone of the repository and access to `docs/`
 
 ## Installation
 
-The package is published from GitHub releases. Until the first public release, install it
+The package is published from GitHub releases. Until the first public
+release, install it
 from the repository root:
 
 ```bash
@@ -35,7 +51,8 @@ mimir ask "How do I configure authentication?"
 mimir status
 ```
 
-By default Mímir writes cache files to `.cache/mimir` relative to the project root.
+By default Mímir writes cache files to `.cache/mimir` relative to the project
+root.
 Everything is controlled through a small YAML configuration file (see
 `config/default.yaml`). Pass a custom configuration via the `--config` option:
 
@@ -53,12 +70,19 @@ vector_search:
 
 ## Optional Features
 
-- **Vector search** – install the `full` extra (`pip install -e .[full]`) and flip
-  `vector_search.enabled` to `true`. The first run will download embedding models; make
-  sure the machine has network access and enough disk space.
-- **LLM-assisted answers** – the local telemetry helper expects an
-  `OPENROUTER_API_KEY` environment variable when advanced enrichment is enabled. This is
-  optional and not required for the core search workflow.
+- **Vector search** – install the `full` extra (`pip install -e .[full]`)
+  and flip `vector_search.enabled` to `true`. The first run downloads
+  embedding models; ensure the machine has network access and enough disk
+  space.
+- **LLM-assisted answers** – export `OPENROUTER_API_KEY` when advanced
+  enrichment is enabled. Optional for the core search workflow.
+
+## Verification
+
+- `mimir status` reports the index path and document count.
+- `just docs check` completes without errors (Markdown lint + index rebuild).
+- The `docs-quality` GitHub Action succeeds on documentation changes.
+- `python -m pytest -q` passes.
 
 ## Development
 
@@ -75,17 +99,25 @@ The CI pipeline mirrors these steps and must succeed before publishing a release
 
 ### Release automation
 
-- Merges to `main` run the `CI` workflow first. If it succeeds, the `Release` workflow runs automatically.
-- The release workflow bumps the version, tags, and publishes a GitHub release **only** when the head commit message starts with `feat:` or `fix:` or contains `BREAKING`.
-- The workflow commits the new version back to `main`, so avoid stacking multiple release-triggering commits without letting automation finish.
-- If the release workflow is skipped, push a qualifying commit message or trigger a rerun after fixing CI.
+- Merges to `main` run the `CI` workflow first. If it succeeds, the `Release`
+  workflow runs automatically.
+- The release workflow bumps the version, tags, and publishes a GitHub release
+  **only** when the head commit message starts with `feat:` or `fix:` or contains
+  `BREAKING`.
+- The workflow commits the new version back to `main`, so avoid stacking
+  multiple release-triggering commits without letting automation finish.
+- If the release workflow is skipped, push a qualifying commit message or
+  trigger a rerun after fixing CI.
 
-If you need to install private dependencies (e.g. `llm-cli-tools-core`) inside CI, follow
-the instructions in `docs/PRIVATE_DEPENDENCIES.md` to set up the shared organization-level
-SSH key and workflow snippet.
+If you need to install private dependencies (e.g. `llm-cli-tools-core`) inside
+CI, follow
+the instructions in `docs/PRIVATE_DEPENDENCIES.md` to set up the shared
+organization-level GitHub App and workflow snippet.
 
-## Telemetry
+## Related Docs
 
-Telemetry hooks are currently local to this repository. Once the shared
-`llm-cli-tools-core` package is available, Mímir will import the shared telemetry helper
-instead of the local compatibility module.
+- `docs/index.md` — documentation taxonomy, owners, and lifecycle.
+- `docs/README.docsearch.md` — full CLI reference.
+- `docs/PRIVATE_DEPENDENCIES.md` — CI configuration for private packages.
+- `docs/SECURITY_FIXES.md` — security remediation log.
+- `CHANGELOG.md` — release history.
