@@ -73,6 +73,10 @@ just build      # build wheel + sdist
 
 The CI pipeline mirrors these steps and must succeed before publishing a release.
 
+If you need to install private dependencies (e.g. `llm-cli-tools-core`) inside CI, follow
+the instructions in `docs/PRIVATE_DEPENDENCIES.md` to set up the shared organization-level
+SSH key and workflow snippet.
+
 ## Telemetry
 
 Telemetry hooks are currently local to this repository. Once the shared
