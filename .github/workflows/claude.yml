@@ -143,10 +143,27 @@ jobs:
         id: models
         run: |
           # Allow repo vars to override defaults
-          docs_model="${{ vars.CLAUDE_MODEL_DOCS || steps.models_defaults.outputs.HAIKU35 }}"
-          just_model="${{ vars.CLAUDE_MODEL_JUSTFILE || steps.models_defaults.outputs.HAIKU35 }}"
-          corr_model="${{ vars.CLAUDE_MODEL_CORRECTNESS || steps.models_defaults.outputs.SONNET4 }}"
-          over_model="${{ vars.CLAUDE_MODEL_OVERENGINEERING || steps.models_defaults.outputs.SONNET4 }}"
+          select_model() {
+            local candidate="$1"
+            local fallback="$2"
+            if [[ -z "$candidate" ]]; then
+              echo "$fallback"
+              return
+            fi
+            # Require Claude 4.x+ family unless explicitly set to opus.
+            if echo "$candidate" | grep -Eq '^claude-.*-(opus|sonnet)-4'; then
+              echo "$candidate"
+            else
+              echo "$fallback"
+            fi
+          }
+
+          docs_model=$(select_model "${{ vars.CLAUDE_MODEL_DOCS }}" "${{ steps.models_defaults.outputs.SONNET4 }}")
+          just_model=$(select_model "${{ vars.CLAUDE_MODEL_JUSTFILE }}" "${{ steps.models_defaults.outputs.SONNET4 }}")
+          corr_model=$(select_model "${{ vars.CLAUDE_MODEL_CORRECTNESS }}" "${{ steps.models_defaults.outputs.OPUS4 }}")
+          over_candidate=$(select_model "${{ vars.CLAUDE_MODEL_OVERENGINEERING }}" "${{ steps.models_defaults.outputs.SONNET4 }}")
+          # Overengineering can stay on Sonnet by default; ensure we never regress to Haiku.
+          over_model="$over_candidate"
 
           echo "docs_model=$docs_model" >> $GITHUB_OUTPUT
           echo "just_model=$just_model" >> $GITHUB_OUTPUT
@@ -259,6 +276,7 @@ jobs:
           CATS: ${{ steps.determine.outputs.cats_csv }}
           DOCS_MODEL: ${{ steps.models.outputs.docs_model }}
           CORR_MODEL: ${{ steps.models.outputs.corr_model }}
+          OVER_MODEL: ${{ steps.models.outputs.over_model }}
           FAMILY: ${{ steps.determine.outputs.model_family }}
         run: |
           # If a model family was explicitly requested, honor it.
@@ -267,14 +285,16 @@ jobs:
               model="${{ vars.CLAUDE_MODEL_OPUS || steps.models_defaults.outputs.OPUS4 }}";
               ;;
             sonnet)
-              model="${{ vars.CLAUDE_MODEL_SONNET || steps.models.outputs.corr_model }}";;
+              model="${{ vars.CLAUDE_MODEL_SONNET || steps.models_defaults.outputs.SONNET4 }}";;
             haiku)
-              model="${{ steps.models.outputs.docs_model }}";;
+              model="${{ vars.CLAUDE_MODEL_SONNET || steps.models_defaults.outputs.SONNET4 }}";;
             *)
               cats="$CATS"
               model="$DOCS_MODEL"
-              if echo "$cats" | grep -Eq 'correctness|overengineering'; then
+              if echo "$cats" | grep -Eq 'correctness'; then
                 model="$CORR_MODEL"
+              elif echo "$cats" | grep -Eq 'overengineering'; then
+                model="$OVER_MODEL"
               fi
               ;;
           esac
