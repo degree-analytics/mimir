@@ -11,7 +11,7 @@ status: "Active"
 ## When to Use This
 
 - Setting up the CLI locally to index and search a documentation corpus
-- Pointing teammates to the canonical install and quick start flow
+- Pointing teammates to the canonical install and quick start flow.
 
 ## Prerequisites
 
