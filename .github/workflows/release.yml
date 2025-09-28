@@ -40,24 +40,23 @@ jobs:
             VERSION_BUMP="patch"
           fi
 
-          NEW_VERSION=$(python3 - <<PY
-version = "$CURRENT_VERSION".split('.')
-bump = "$VERSION_BUMP"
-major, minor, patch = [int(part) for part in version]
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+          case "$VERSION_BUMP" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            *)
+              patch=$((patch + 1))
+              ;;
+          esac
 
-if bump == 'major':
-    major += 1
-    minor = 0
-    patch = 0
-elif bump == 'minor':
-    minor += 1
-    patch = 0
-else:
-    patch += 1
-
-print(f"{major}.{minor}.{patch}")
-PY
-)
+          NEW_VERSION="$major.$minor.$patch"
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Update version files
