@@ -1,0 +1,13 @@
+{
+  "config": "default_minilm",
+  "guardrails": {
+    "precision_at_5": 0.20,
+    "recall_at_10": 0.75,
+    "ndcg_at_10": 0.50,
+    "fast_p95_ms": 200,
+    "smart_p95_ms": 3000,
+    "accurate_p95_ms": 5000,
+    "highlight_success_rate": 0.30,
+    "chat_success_rate": 0.90
+  }
+}

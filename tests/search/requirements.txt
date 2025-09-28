@@ -1,0 +1,8 @@
+pytest>=7.4
+pytest-json-report>=1.5
+numpy>=1.24
+scikit-learn>=1.4
+sentence-transformers>=2.7
+faiss-cpu>=1.7.4
+pyyaml>=6.0
+rouge-score>=0.1.2
