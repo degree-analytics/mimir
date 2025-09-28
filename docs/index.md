@@ -48,6 +48,8 @@ status: "Active"
   replacement.
 - Add new docs using the templates in `.docs-templates/` to keep metadata and
   layout consistent.
+- Prefix release-bound merges with `feat:` or `fix:` (or include `BREAKING`)
+  so the automated release workflow runs to completion.
 
 ## References
 
