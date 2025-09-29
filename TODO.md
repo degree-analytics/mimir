@@ -1,4 +1,4 @@
-# Mímir v1.0 Release Checklist
+# Mímir v1.4.0 Release Checklist
 
 ## 1. Verify Code & Tests
 - [x] Run `just install` (editable install with extras)
@@ -24,7 +24,7 @@
 - [x] Mirror release automation approach from `../llm-cli-tools-core`
 
 ## 5. Post-Release Follow-up
-- Replace local telemetry shim with `llm-cli-tools-core` once published
+- [ ] Replace local telemetry shim with `llm-cli-tools-core` once published
 - Update SpaceWalker to depend on the new package + remove legacy doc finder scripts
 
 > Tip: use the Justfile for all commands and rely on the packaged configuration unless you

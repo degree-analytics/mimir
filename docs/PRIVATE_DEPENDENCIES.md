@@ -48,7 +48,7 @@ status: "Active"
    ```yaml
    - name: Generate GitHub App token
      id: llm_cli_app
-     uses: tibdex/github-app-token@v1
+     uses: tibdex/github-app-token@v2
      with:
        app_id: ${{ vars.APP_ID }}
        private_key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -76,7 +76,7 @@ status: "Active"
 
 - `just docs check` (once spell/link linting lands) confirms docs stay up to
   date.
-- GitHub Action logs show `tibdex/github-app-token@v1` succeeded and the pip
+- GitHub Action logs show `tibdex/github-app-token@v2` succeeded and the pip
   installation exited `0`.
 - Optional local test:
 

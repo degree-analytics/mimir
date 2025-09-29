@@ -73,24 +73,24 @@ status: "Active"
 
 ### Test Coverage
 
-- `tests/test_path_resolution.py` — verifies project root, cache directory,
+- `tests/test_indexer.py` — verifies project root, cache directory,
   config loading, environment files, and path traversal protections.
-- `tests/test_security.py` — validates prompt injection defenses, preserves
+- `tests/test_cli.py` — validates prompt injection defenses, preserves
   legitimate queries, enforces input limits, and escapes special characters.
-- `tests/test_integration.py` — covers end-to-end indexing/search workflows,
+- `tests/integration/` — covers end-to-end indexing/search workflows,
   error handling, configuration loading, and cache reuse.
 
 ## Verification
 
-- `python -m pytest tests/test_security.py -q`
-- `python -m pytest tests/test_path_resolution.py -q`
+- `python -m pytest tests/test_cli.py -q`
+- `python -m pytest tests/test_indexer.py -q`
 - `just docs check`
 - `mimir status` shows cache in `.cache/mimir`
 
 ## Deployment Checklist
 
 - [ ] Run full test suite: `python -m pytest tests/`
-- [ ] Verify path resolution: `python -c "from src.core.indexer import
+- [ ] Verify path resolution: `python -c "from src.mimir.core.indexer import
   DocumentIndexer"`
 - [ ] Test basic functionality: `mimir search "test" --limit 2`
 - [ ] Check cache creation in project root

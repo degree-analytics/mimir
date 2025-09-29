@@ -20,7 +20,7 @@ status: "Active"
 ## v1.0.0 - 2025-09-27
 
 - Replaced the experimental CLI with the streamlined command set (`mimir index`,
-  `mimir search`, `mimir ask`, `mimir status`).
+  `mimir search`, `mimir ask`, `mimir status`, `mimir version`).
 - Added pytest coverage for the indexer, search engine, and CLI workflows.
 - Disabled vector search by default while keeping optional extras available when
   embeddings are installed.
