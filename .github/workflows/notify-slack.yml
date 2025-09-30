@@ -1,0 +1,53 @@
+name: Notify Slack on CI status
+
+on:
+  workflow_run:
+    workflows:
+      - Release
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to simulate
+        required: true
+        default: main
+        type: choice
+        options:
+          - main
+      status:
+        description: Status to report (success, failure, cancelled)
+        required: true
+        default: success
+        type: choice
+        options:
+          - success
+          - failure
+          - cancelled
+      head_sha:
+        description: Commit SHA to inspect (defaults to workflow SHA)
+        required: false
+        default: ''
+        type: string
+      run_url:
+        description: Run URL to include (defaults to this workflow run)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read  # Required for reusable workflow's checkout
+
+jobs:
+  notify:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.branch == 'main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main')
+    uses: ./.github/workflows/slack-message.yml
+    secrets: inherit
+    with:
+      branch: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.event.workflow_run.head_branch }}
+      status: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.status || github.event.workflow_run.conclusion || 'success' }}
+      run-url: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.run_url != '' && github.event.inputs.run_url) || github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+      head_sha: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.head_sha != '' && github.event.inputs.head_sha) || github.event.workflow_run.head_sha || github.sha }}
+      actor: ${{ github.event_name == 'workflow_dispatch' && github.actor || github.event.workflow_run.actor.login || github.actor }}
+      repo: ${{ github.repository }}
