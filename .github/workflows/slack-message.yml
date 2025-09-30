@@ -1,0 +1,247 @@
+name: Slack Message Dispatcher
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: Target git branch (e.g., main)
+        required: true
+        type: string
+      status:
+        description: Conclusion status from the triggering workflow run
+        required: true
+        type: string
+      run-url:
+        description: URL to the triggering workflow run
+        required: true
+        type: string
+      head_sha:
+        description: Commit SHA associated with the workflow run
+        required: true
+        type: string
+      actor:
+        description: GitHub username that initiated the workflow run
+        required: true
+        type: string
+      repo:
+        description: Full repository name (owner/repo)
+        required: true
+        type: string
+    secrets:
+      SLACK_BOT_TOKEN:
+        required: false
+      SLACK_CHANNEL_DEV:
+        required: false
+  push:
+    paths:
+      - .github/workflows/slack-message.yml
+
+jobs:
+  post:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate required secrets
+        id: validate
+        run: |
+          missing=0
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ]; then
+            echo "::warning::Missing SLACK_BOT_TOKEN secret. Slack notification will be skipped."
+            missing=1
+          fi
+          if [ -z "${{ secrets.SLACK_CHANNEL_DEV }}" ]; then
+            echo "::warning::SLACK_CHANNEL_DEV is not set. Notifications will be skipped."
+            missing=1
+          fi
+          if [ $missing -eq 1 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine environment metadata
+        id: env-data
+        if: steps.validate.outputs.skip != 'true'
+        env:
+          BRANCH: ${{ inputs.branch }}
+          DEV_CHANNEL: ${{ secrets.SLACK_CHANNEL_DEV }}
+        run: |
+          # For mimir, all main branch pushes go to releases-dev
+          if [ "$BRANCH" = "main" ]; then
+            channel="$DEV_CHANNEL"
+            environment="Main"
+          else
+            channel=""
+            environment="$BRANCH"
+          fi
+
+          trimmed=$(echo "$channel" | tr -d '[:space:]')
+          if [ -z "$trimmed" ]; then
+            echo "::warning::No Slack channel configured for branch '$BRANCH'. Skipping notification."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+
+      - name: Capture commit metadata
+        id: commit
+        if: steps.validate.outputs.skip != 'true' && steps.env-data.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          subject=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq '.commit.message' | head -n1)
+          short_sha="${HEAD_SHA:0:7}"
+          echo "subject<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$subject" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "short=$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Detect version changes
+        id: version
+        if: steps.validate.outputs.skip != 'true' && steps.env-data.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          # Get the latest tag starting with 'v'
+          LATEST_TAG=$(gh api "repos/$REPO/git/matching-refs/tags/v" --jq '.[-1].ref' 2>/dev/null | sed 's|refs/tags/||' || true)
+
+          if [ -n "$LATEST_TAG" ]; then
+            # Get tag creation timestamp
+            TAG_CREATED=$(gh api "repos/$REPO/git/refs/tags/$LATEST_TAG" --jq '.object.sha' | xargs -I {} gh api "repos/$REPO/git/tags/{}" --jq '.tagger.date' 2>/dev/null || echo "")
+
+            if [ -n "$TAG_CREATED" ]; then
+              TAG_TIMESTAMP=$(date -d "$TAG_CREATED" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$TAG_CREATED" +%s 2>/dev/null || echo "0")
+              NOW=$(date +%s)
+              AGE=$((NOW - TAG_TIMESTAMP))
+
+              # If tag is less than 5 minutes old, treat as release
+              if [ "$AGE" -lt 300 ]; then
+                echo "is_release=true" >> "$GITHUB_OUTPUT"
+                echo "version=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
+              else
+                # Get version from pyproject.toml at head_sha
+                VERSION=$(gh api "repos/$REPO/contents/pyproject.toml?ref=$HEAD_SHA" --jq '.content' | base64 -d | grep 'version = ' | head -n1 | cut -d'"' -f2 || true)
+                echo "is_release=false" >> "$GITHUB_OUTPUT"
+                echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              # Couldn't get tag timestamp, fallback to pyproject.toml
+              VERSION=$(gh api "repos/$REPO/contents/pyproject.toml?ref=$HEAD_SHA" --jq '.content' | base64 -d | grep 'version = ' | head -n1 | cut -d'"' -f2 || true)
+              echo "is_release=false" >> "$GITHUB_OUTPUT"
+              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            # No tags found, get version from pyproject.toml
+            VERSION=$(gh api "repos/$REPO/contents/pyproject.toml?ref=$HEAD_SHA" --jq '.content' | base64 -d | grep 'version = ' | head -n1 | cut -d'"' -f2 || true)
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Slack payload
+        id: payload
+        if: steps.validate.outputs.skip != 'true' && steps.env-data.outputs.skip != 'true'
+        env:
+          STATUS: ${{ inputs.status }}
+          CHANNEL: ${{ steps.env-data.outputs.channel }}
+          ENVIRONMENT: ${{ steps.env-data.outputs.environment }}
+          IS_RELEASE: ${{ steps.version.outputs.is_release }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SUBJECT: ${{ steps.commit.outputs.subject }}
+          SHORT_SHA: ${{ steps.commit.outputs.short }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          REPO: ${{ inputs.repo }}
+          ACTOR: ${{ inputs.actor }}
+          RUN_URL: ${{ inputs['run-url'] }}
+        run: |
+          # Escape special characters for Slack mrkdwn to prevent formatting issues
+          SUBJECT_ESCAPED=$(echo "$SUBJECT" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+          # Determine emoji based on status
+          if [ "$STATUS" = "success" ]; then
+            EMOJI=":large_green_circle:"
+          else
+            EMOJI=":red_circle:"
+          fi
+
+          # Build title and header
+          if [ "$IS_RELEASE" = "true" ] && [ -n "$VERSION" ]; then
+            TITLE="$ENVIRONMENT Released v$VERSION"
+            VERSION_LINE="• *Version*: v$VERSION"$'\n'
+          else
+            TITLE="$ENVIRONMENT CI ${STATUS^^}"
+            VERSION_LINE=""
+          fi
+
+          # Build commit line
+          COMMIT_URL="https://github.com/$REPO/commit/$HEAD_SHA"
+          COMMIT_LINE="• *Commit*: <$COMMIT_URL|$SHORT_SHA> – \"$SUBJECT_ESCAPED\""$'\n'
+
+          # Build actor and repo lines
+          ACTOR_LINE="• *Actor*: @$ACTOR"$'\n'
+          REPO_LINE="• *Repo*: $REPO"
+
+          # Construct full header text
+          HEADER_TEXT="${VERSION_LINE}${COMMIT_LINE}${ACTOR_LINE}${REPO_LINE}"
+
+          # Build JSON payload using jq for proper escaping
+          jq -n \
+            --arg channel "$CHANNEL" \
+            --arg text "$EMOJI $TITLE" \
+            --arg emoji "$EMOJI" \
+            --arg title "$TITLE" \
+            --arg header "$HEADER_TEXT" \
+            --arg run_url "$RUN_URL" \
+            '{
+              channel: $channel,
+              text: $text,
+              blocks: [
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ($emoji + " *" + $title + "*\n" + $header)
+                  }
+                },
+                {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: ("<" + $run_url + "|View run details>")
+                    }
+                  ]
+                }
+              ]
+            }' > payload.json
+
+      - name: Send Slack message
+        id: slack
+        if: steps.validate.outputs.skip != 'true' && steps.env-data.outputs.skip != 'true'
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload-file-path: payload.json
+
+      - name: Log Slack post result
+        if: always() && steps.validate.outputs.skip != 'true' && steps.env-data.outputs.skip != 'true'
+        run: |
+          if [ "${{ steps.slack.outcome }}" = "failure" ]; then
+            echo "::warning::Slack notification failed. Check prior step for details."
+          else
+            echo "Slack notification step outcome: ${{ steps.slack.outcome }}"
+          fi
+  noop:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Skip reusable workflow on push
+        run: echo 'Reusable workflow - no action for push trigger.'

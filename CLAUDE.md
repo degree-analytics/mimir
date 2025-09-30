@@ -51,6 +51,11 @@ status: "Active"
    `../spacewalker/docs/architecture/system-architecture.md` when shaping
    onboarding or architecture docs.
 
+## File Conventions
+
+- **Temp Files**: Always use `.build/tmp/` (never `/tmp/`)
+- **Build Artifacts**: `.build/` and `.dist/` are gitignored
+
 ## Automation Alignment
 
 - `codex.yml` mirrors CI (install → lint → test → build).
