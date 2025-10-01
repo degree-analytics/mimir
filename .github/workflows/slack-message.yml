@@ -169,84 +169,84 @@ jobs:
           RUN_URL: ${{ inputs['run-url'] }}
         run: |
           python - <<'PY'
-import json
-import os
+          import json
+          import os
 
-def slack_escape(value: str) -> str:
-    return value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+          def slack_escape(value: str) -> str:
+              return value.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-status = os.environ.get('STATUS', 'unknown').lower()
-status_label = status.upper() if status else 'UNKNOWN'
-emoji = ':large_green_circle:' if status == 'success' else ':red_circle:'
-environment = os.environ.get('ENVIRONMENT', 'Main')
-is_release = os.environ.get('IS_RELEASE', 'false').lower() == 'true'
-has_version = os.environ.get('HAS_VERSION', 'false').lower() == 'true'
-version = os.environ.get('VERSION', '').strip()
+          status = os.environ.get('STATUS', 'unknown').lower()
+          status_label = status.upper() if status else 'UNKNOWN'
+          emoji = ':large_green_circle:' if status == 'success' else ':red_circle:'
+          environment = os.environ.get('ENVIRONMENT', 'Main')
+          is_release = os.environ.get('IS_RELEASE', 'false').lower() == 'true'
+          has_version = os.environ.get('HAS_VERSION', 'false').lower() == 'true'
+          version = os.environ.get('VERSION', '').strip()
 
-subject = slack_escape(os.environ.get('SUBJECT', '').strip())
-short_sha = os.environ.get('SHORT_SHA', '').strip()
-repo = os.environ.get('REPO', '').strip()
-actor = os.environ.get('ACTOR', '').strip()
-run_url = os.environ.get('RUN_URL', '').strip()
-head_sha = os.environ.get('HEAD_SHA', '').strip()
-channel = os.environ.get('CHANNEL', '').strip()
+          subject = slack_escape(os.environ.get('SUBJECT', '').strip())
+          short_sha = os.environ.get('SHORT_SHA', '').strip()
+          repo = os.environ.get('REPO', '').strip()
+          actor = os.environ.get('ACTOR', '').strip()
+          run_url = os.environ.get('RUN_URL', '').strip()
+          head_sha = os.environ.get('HEAD_SHA', '').strip()
+          channel = os.environ.get('CHANNEL', '').strip()
 
-if is_release and version:
-    heading_core = f"{environment} release {status_label}"
-    text = f"{emoji} {heading_core} – {version}"
-    decorated_heading = f"{emoji} *{heading_core} – {version}*"
-else:
-    heading_core = f"{environment} CI {status_label}"
-    text = f"{emoji} {heading_core}"
-    decorated_heading = f"{emoji} *{heading_core}*"
+          if is_release and version:
+              heading_core = f"{environment} release {status_label}"
+              text = f"{emoji} {heading_core} – {version}"
+              decorated_heading = f"{emoji} *{heading_core} – {version}*"
+          else:
+              heading_core = f"{environment} CI {status_label}"
+              text = f"{emoji} {heading_core}"
+              decorated_heading = f"{emoji} *{heading_core}*"
 
-commit_url = f"https://github.com/{repo}/commit/{head_sha}" if repo and head_sha else ''
+          commit_url = f"https://github.com/{repo}/commit/{head_sha}" if repo and head_sha else ''
 
-lines = []
-if (is_release and version) or (has_version and version):
-    lines.append(f"• *Version*: {version}")
+          lines = []
+          if (is_release and version) or (has_version and version):
+              lines.append(f"• *Version*: {version}")
 
-commit_suffix = f" – \"{subject}\"" if subject else ''
-if short_sha:
-    if commit_url:
-        lines.append(f"• *Commit*: <{commit_url}|{short_sha}>{commit_suffix}")
-    else:
-        lines.append(f"• *Commit*: {short_sha}{commit_suffix}")
-elif subject:
-    lines.append(f"• *Commit*: \"{subject}\"")
-if actor:
-    lines.append(f"• *Actor*: @{actor}")
-if repo:
-    lines.append(f"• *Repo*: {repo}")
+          commit_suffix = f" – \"{subject}\"" if subject else ''
+          if short_sha:
+              if commit_url:
+                  lines.append(f"• *Commit*: <{commit_url}|{short_sha}>{commit_suffix}")
+              else:
+                  lines.append(f"• *Commit*: {short_sha}{commit_suffix}")
+          elif subject:
+              lines.append(f"• *Commit*: \"{subject}\"")
+          if actor:
+              lines.append(f"• *Actor*: @{actor}")
+          if repo:
+              lines.append(f"• *Repo*: {repo}")
 
-payload = {
-    'channel': channel,
-    'text': text,
-    'blocks': [
-        {
-            'type': 'section',
-            'text': {
-                'type': 'mrkdwn',
-                'text': decorated_heading + ('\n' + '\n'.join(lines) if lines else '')
-            }
-        }
-    ]
-}
+          payload = {
+              'channel': channel,
+              'text': text,
+              'blocks': [
+                  {
+                      'type': 'section',
+                      'text': {
+                          'type': 'mrkdwn',
+                          'text': decorated_heading + ('\n' + '\n'.join(lines) if lines else '')
+                      }
+                  }
+              ]
+          }
 
-if run_url:
-    payload['blocks'].append({
-        'type': 'context',
-        'elements': [
-            {
-                'type': 'mrkdwn',
-                'text': f"<{run_url}|View run details>"
-            }
-        ]
-    })
+          if run_url:
+              payload['blocks'].append({
+                  'type': 'context',
+                  'elements': [
+                      {
+                          'type': 'mrkdwn',
+                          'text': f"<{run_url}|View run details>"
+                      }
+                  ]
+              })
 
-with open('payload.json', 'w', encoding='utf-8') as fh:
-    json.dump(payload, fh)
-PY
+          with open('payload.json', 'w', encoding='utf-8') as fh:
+              json.dump(payload, fh)
+          PY
 
       - name: Send Slack message
         id: slack
