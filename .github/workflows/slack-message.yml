@@ -9,40 +9,36 @@ on:
     inputs:
       branch:
         description: Target git branch (e.g., main)
-        required: false
+        required: true
         type: string
       status:
         description: Conclusion status from the triggering workflow run
-        required: false
+        required: true
         type: string
       run-url:
         description: URL to the triggering workflow run
-        required: false
+        required: true
         type: string
       head_sha:
         description: Commit SHA associated with the workflow run
-        required: false
+        required: true
         type: string
       actor:
         description: GitHub username that initiated the workflow run
-        required: false
+        required: true
         type: string
       repo:
         description: Full repository name (owner/repo)
-        required: false
+        required: true
         type: string
     secrets:
       SLACK_BOT_TOKEN:
         required: false
       SLACK_CHANNEL_DEV:
         required: false
-  push:
-    paths:
-      - .github/workflows/slack-message.yml
 
 jobs:
   post:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -270,10 +266,3 @@ PY
           else
             echo "Slack notification step outcome: ${{ steps.slack.outcome }}"
           fi
-  noop:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Skip reusable workflow on push
-        run: echo 'Reusable workflow - no action for push trigger.'
